@@ -1,0 +1,118 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;900&family=Noto+Serif+KR:wght@300;600;900&family=Outfit:wght@300;400;600;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg-dark: #07070a;
+  --panel-bg: rgba(12, 12, 20, 0.85);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --accent-red: #ff3b3f;
+  --accent-blue: #00e5ff;
+  --accent-gold: #ffb300;
+  --text-primary: #f5f5fa;
+  --text-secondary: #a0a0b5;
+  --font-game: 'Outfit', sans-serif;
+  --font-title: 'Cinzel', serif;
+  --font-serif: 'Noto Serif KR', serif;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: var(--font-game);
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom styled scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* CSS Utilities for Premium Design */
+.premium-glow-red {
+  text-shadow: 0 0 15px rgba(255, 59, 63, 0.5);
+}
+
+.premium-glow-blue {
+  text-shadow: 0 0 15px rgba(0, 229, 255, 0.5);
+}
+
+.premium-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(16px);
+  border-radius: 16px;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7);
+}
+
+.glow-btn-red {
+  background: linear-gradient(135deg, var(--accent-red) 0%, #aa1122 100%);
+  color: white;
+  box-shadow: 0 0 20px rgba(255, 59, 63, 0.3);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.glow-btn-red:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(255, 59, 63, 0.6);
+  filter: brightness(1.1);
+}
+
+.glow-btn-gold {
+  background: linear-gradient(135deg, var(--accent-gold) 0%, #d48800 100%);
+  color: white;
+  box-shadow: 0 0 20px rgba(255, 179, 0, 0.25);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.glow-btn-gold:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(255, 179, 0, 0.5);
+  filter: brightness(1.1);
+}
+
+.key-cap {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 3px solid rgba(255, 255, 255, 0.25);
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: monospace;
+  color: #fff;
+  display: inline-block;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+/* Floating Animation */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+/* Screen shake effect class */
+.shake-screen {
+  animation: shake 0.15s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+@keyframes shake {
+  10%, 90% { transform: translate3d(-2px, 0, 0); }
+  20%, 80% { transform: translate3d(3px, -2px, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 4px, 0); }
+  40%, 60% { transform: translate3d(4px, -1px, 0); }
+}
