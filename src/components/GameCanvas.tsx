@@ -1,13 +1,17 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import PartySocket from "partysocket";
 import { sfx } from "../utils/audio";
 
 interface GameCanvasProps {
   equippedSkin: string;
-  difficulty: "easy" | "normal" | "hard";
+  playerName: string;
+  roomId: string;               // The partykit room ID (= matchmaking lobby ID)
+  yourSide: "p1" | "p2";       // Which side you are
+  opponentName: string;
   onGameEnd: (winner: "p1" | "p2", timeSeconds: number) => void;
-  gameActive: boolean;
+  onOpponentLeft: () => void;
 }
 
 // Skins Definition
@@ -22,17 +26,25 @@ export const SKINS_DATA: Record<
   legendary: { name: "전설의 명검", color: "#ffb700", trailColor: "rgba(255, 220, 0, 0.6)", lengthBonus: 30, width: 7 },
 };
 
+// PARTYKIT host – in dev, use localhost:1999, in prod, use the deployed URL
+const PARTYKIT_HOST =
+  process.env.NEXT_PUBLIC_PARTYKIT_HOST || "slaaash-game.YOUR_ACCOUNT.partykit.dev";
+
 export default function GameCanvas({
   equippedSkin,
-  difficulty,
+  playerName,
+  roomId,
+  yourSide,
+  opponentName,
   onGameEnd,
-  gameActive,
+  onOpponentLeft,
 }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  // Instability states (shared with UI or rendered on-canvas)
+  const socketRef = useRef<PartySocket | null>(null);
   const [p1Instability, setP1Instability] = useState(0);
   const [p2Instability, setP2Instability] = useState(0);
+
+  const handleOpponentLeft = useCallback(onOpponentLeft, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -41,562 +53,343 @@ export default function GameCanvas({
     if (!ctx) return;
 
     let animationFrameId: number;
+    const skinInfo = SKINS_DATA[equippedSkin] || SKINS_DATA.shinai;
+    const groundY = 480;
 
-    // Keys state
+    // ─── Input ────────────────────────────────────────────────────────────────
     const keys: Record<string, boolean> = {};
-
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       keys[e.key.toLowerCase()] = true;
       if (e.key === "Shift") keys["shift"] = true;
     };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
+    const onKeyUp = (e: KeyboardEvent) => {
       keys[e.key.toLowerCase()] = false;
       if (e.key === "Shift") keys["shift"] = false;
     };
+    const onMouseDown = () => { keys["click"] = true; };
+    const onMouseUp = () => { keys["click"] = false; };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
 
-    const handleMouseDown = () => {
-      if (gameActive) keys["click"] = true;
-    };
-
-    const handleMouseUp = () => {
-      keys["click"] = false;
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    window.addEventListener("mousedown", handleMouseDown);
-    window.addEventListener("mouseup", handleMouseUp);
-
-    // Game variables
-    const groundY = 480;
-    const skinInfo = SKINS_DATA[equippedSkin] || SKINS_DATA.shinai;
-
-    // Screen Shake state
+    // ─── Screen Shake ─────────────────────────────────────────────────────────
     let shakeIntensity = 0;
+    const triggerShake = (v: number) => { shakeIntensity = v; };
 
-    const triggerShake = (intensity: number) => {
-      shakeIntensity = intensity;
-    };
+    // ─── Characters ───────────────────────────────────────────────────────────
+    // me = local player (P1 or P2 logically, always drawn as left or right)
+    const isP1 = yourSide === "p1";
 
-    // Characters
-    const p1 = {
-      x: 200,
+    const me = {
+      x: isP1 ? 200 : 780,
       y: groundY - 80,
-      vx: 0,
-      vy: 0,
-      width: 40,
-      height: 80,
+      vx: 0, vy: 0,
+      width: 40, height: 80,
       isGrounded: true,
-      facingLeft: false,
-      color: "#ff3b3f",
-      // Combat
-      isBlocking: false,
-      instability: 0,
-      isGroggy: false,
-      groggyTimer: 0,
-      // Attack state
-      isAttacking: false,
-      attackCooldown: 0,
-      attackProgress: 0, // 0 to 1
-      attackDuration: 12, // frames
-      // Dash
-      dashCooldown: 0,
-      dashTimer: 0,
+      facingLeft: !isP1,
+      color: isP1 ? "#ff3b3f" : "#00e5ff",
+      isBlocking: false, instability: 0, isGroggy: false, groggyTimer: 0,
+      isAttacking: false, attackCooldown: 0, attackProgress: 0, attackDuration: 12,
+      dashCooldown: 0, dashTimer: 0,
     };
 
-    const p2 = {
-      x: 800,
+    // opponent – state comes from server
+    const opp = {
+      x: isP1 ? 780 : 200,
       y: groundY - 80,
-      vx: 0,
-      vy: 0,
-      width: 40,
-      height: 80,
+      vx: 0, vy: 0,
+      width: 40, height: 80,
       isGrounded: true,
-      facingLeft: true,
-      color: "#00e5ff",
-      // Combat
-      isBlocking: false,
-      instability: 0,
-      isGroggy: false,
-      groggyTimer: 0,
-      // Attack state
-      isAttacking: false,
-      attackCooldown: 0,
-      attackProgress: 0,
-      attackDuration: 12,
-      // Dash
-      dashCooldown: 0,
-      dashTimer: 0,
+      facingLeft: isP1,
+      color: isP1 ? "#00e5ff" : "#ff3b3f",
+      isBlocking: false, instability: 0, isGroggy: false, groggyTimer: 0,
+      isAttacking: false, attackCooldown: 0, attackProgress: 0, attackDuration: 12,
     };
 
-    // Particles
-    interface Particle {
-      x: number;
-      y: number;
-      vx: number;
-      vy: number;
-      color: string;
-      size: number;
-      life: number;
-      maxLife: number;
-    }
-
-    interface CherryPetal {
-      x: number;
-      y: number;
-      speedX: number;
-      speedY: number;
-      angle: number;
-      spinSpeed: number;
-      size: number;
-    }
-
+    // ─── Particles ────────────────────────────────────────────────────────────
+    interface Particle { x:number; y:number; vx:number; vy:number; color:string; size:number; life:number; maxLife:number; }
+    interface CherryPetal { x:number; y:number; speedX:number; speedY:number; angle:number; spinSpeed:number; size:number; }
     const particles: Particle[] = [];
     const cherryPetals: CherryPetal[] = Array.from({ length: 40 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      speedX: -1 - Math.random() * 2,
-      speedY: 0.5 + Math.random() * 1.5,
-      angle: Math.random() * Math.PI * 2,
-      spinSpeed: -0.02 + Math.random() * 0.04,
+      x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+      speedX: -1 - Math.random() * 2, speedY: 0.5 + Math.random() * 1.5,
+      angle: Math.random() * Math.PI * 2, spinSpeed: -0.02 + Math.random() * 0.04,
       size: 4 + Math.random() * 6,
     }));
 
     const createSparks = (x: number, y: number, color: string) => {
-      for (let i = 0; i < 15; i++) {
-        particles.push({
-          x,
-          y,
-          vx: (Math.random() - 0.5) * 12,
-          vy: (Math.random() - 0.6) * 10 - 2,
-          color,
-          size: 2 + Math.random() * 3,
-          life: 0,
-          maxLife: 20 + Math.random() * 20,
-        });
-      }
+      for (let i = 0; i < 15; i++) particles.push({ x, y, vx: (Math.random() - 0.5) * 12, vy: (Math.random() - 0.6) * 10 - 2, color, size: 2 + Math.random() * 3, life: 0, maxLife: 20 + Math.random() * 20 });
     };
-
     const createBlood = (x: number, y: number) => {
-      for (let i = 0; i < 20; i++) {
-        particles.push({
-          x,
-          y,
-          vx: (Math.random() - 0.5) * 10 + (p1.facingLeft ? -4 : 4),
-          vy: (Math.random() - 0.7) * 8 - 2,
-          color: "#ff1122",
-          size: 3 + Math.random() * 4,
-          life: 0,
-          maxLife: 30 + Math.random() * 15,
-        });
-      }
+      for (let i = 0; i < 20; i++) particles.push({ x, y, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.7) * 8 - 2, color: "#ff1122", size: 3 + Math.random() * 4, life: 0, maxLife: 30 + Math.random() * 15 });
     };
 
-    let startTime = Date.now();
-    let matchWinner: "p1" | "p2" | null = null;
+    // ─── Game State ───────────────────────────────────────────────────────────
     let roundEnded = false;
+    const startTime = Date.now();
 
-    // AI Logic Controller
-    const updateAI = () => {
-      if (roundEnded || !gameActive) return;
+    // ─── WebSocket ────────────────────────────────────────────────────────────
+    const socket = new PartySocket({ host: PARTYKIT_HOST, room: roomId });
+    socketRef.current = socket;
 
-      const dist = Math.abs(p2.x - p1.x);
-      const isPlayerAttacking = p1.isAttacking && p1.attackProgress < 0.6;
+    socket.onmessage = (evt) => {
+      const msg = JSON.parse(evt.data);
 
-      // Reset block
-      p2.isBlocking = false;
-
-      // Handle AI Groggy
-      if (p2.isGroggy) return;
-
-      // AI attributes based on difficulty
-      let rxTime = 0.95; // Attack probability scale
-      let blockChance = 0.5;
-      let dashChance = 0.01;
-
-      if (difficulty === "easy") {
-        rxTime = 0.5;
-        blockChance = 0.1;
-        dashChance = 0.002;
-      } else if (difficulty === "hard") {
-        rxTime = 0.99;
-        blockChance = 0.85;
-        dashChance = 0.05;
+      if (msg.type === "opponent_state") {
+        opp.x = msg.x;
+        opp.y = msg.y;
+        opp.vx = msg.vx;
+        opp.vy = msg.vy;
+        opp.facingLeft = msg.facingLeft;
+        opp.isAttacking = msg.isAttacking;
+        opp.attackProgress = msg.attackProgress;
+        opp.isBlocking = msg.isBlocking;
+        opp.isGroggy = msg.isGroggy;
+        opp.instability = msg.instability;
       }
 
-      // 1. Defend / Parry logic
-      if (isPlayerAttacking && dist < 160 && !p2.isGroggy) {
-        if (Math.random() < blockChance && p2.instability < 90) {
-          p2.isBlocking = true;
+      if (msg.type === "opponent_event") {
+        if (msg.event === "clash") {
+          sfx.playClash();
+          triggerShake(5);
+          createSparks(
+            (me.x + opp.x) / 2,
+            (me.y + opp.y) / 2 + 20,
+            "#ffffff"
+          );
+        }
+        if (msg.event === "death") {
+          // Opponent says I died
+          createBlood(me.x + me.width / 2, me.y + me.height / 3);
+          triggerShake(20);
+          roundEnded = true;
+          sfx.playLose();
+          const winTime = (Date.now() - startTime) / 1000;
+          setTimeout(() => onGameEnd(isP1 ? "p2" : "p1", winTime), 800);
         }
       }
 
-      // 2. Dash logic
-      if (isPlayerAttacking && dist < 120 && Math.random() < dashChance && p2.dashCooldown <= 0) {
-        p2.dashTimer = 8;
-        p2.dashCooldown = 60;
-        p2.vx = p2.facingLeft ? -15 : 15;
+      if (msg.type === "opponent_left") {
+        handleOpponentLeft();
       }
+    };
 
-      // 3. Movement & Attack logic
-      p2.facingLeft = p1.x < p2.x;
+    // ─── Send my state to server ~60fps ───────────────────────────────────────
+    let sendTick = 0;
+    const sendState = () => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({
+        type: "state",
+        x: me.x, y: me.y, vx: me.vx, vy: me.vy,
+        facingLeft: me.facingLeft,
+        isAttacking: me.isAttacking,
+        attackProgress: me.attackProgress,
+        isBlocking: me.isBlocking,
+        isGroggy: me.isGroggy,
+        instability: me.instability,
+      }));
+    };
 
-      if (!p2.isBlocking && p2.dashTimer <= 0) {
-        if (dist > 130 + skinInfo.lengthBonus) {
-          // Approach player
-          p2.vx = p2.facingLeft ? -4 : 4;
-        } else if (dist < 80) {
-          // Back off slightly
-          p2.vx = p2.facingLeft ? 3 : -3;
+    // ─── Hit Detection (local authority on MY attacks) ───────────────────────
+    const detectHit = () => {
+      if (!me.isAttacking || roundEnded) return;
+      const reach = 85 + skinInfo.lengthBonus;
+      const swordX = me.facingLeft ? me.x - reach : me.x + me.width;
+      const swordBox = { x: swordX, y: me.y + 10, w: reach, h: me.height - 10 };
+      const oppBox = { x: opp.x, y: opp.y, w: opp.width, h: opp.height };
+
+      const overlapping =
+        swordBox.x < oppBox.x + oppBox.w &&
+        swordBox.x + swordBox.w > oppBox.x &&
+        swordBox.y < oppBox.y + oppBox.h &&
+        swordBox.y + swordBox.h > oppBox.y;
+
+      if (overlapping && me.attackProgress > 0.1 && me.attackProgress < 0.6) {
+        if (opp.isBlocking) {
+          // Clash – notify opponent
+          opp.instability = Math.min(100, opp.instability + 22);
+          me.isAttacking = false;
+          createSparks(opp.facingLeft ? opp.x : opp.x + opp.width, me.y + 35, "#ffffff");
+          sfx.playClash();
+          triggerShake(5);
+          socket.send(JSON.stringify({ type: "event", event: "clash", targetId: "" }));
         } else {
-          p2.vx = 0;
-          // Slash chance
-          if (Math.random() < rxTime * 0.08 && p2.attackCooldown <= 0) {
-            p2.isAttacking = true;
-            p2.attackProgress = 0;
-            p2.attackCooldown = 40;
-            sfx.playSlash();
-          }
+          // Kill – notify opponent of their death
+          createBlood(opp.x + opp.width / 2, opp.y + opp.height / 3);
+          triggerShake(20);
+          roundEnded = true;
+          sfx.playWin();
+          socket.send(JSON.stringify({ type: "event", event: "death", targetId: "" }));
+          const winTime = (Date.now() - startTime) / 1000;
+          setTimeout(() => onGameEnd(isP1 ? "p1" : "p2", winTime), 800);
         }
       }
     };
 
-    // Main Game Loop
+    // ─── Main Render Loop ─────────────────────────────────────────────────────
     const tick = () => {
-      // 1. Screen Shake computation
       ctx.save();
       if (shakeIntensity > 0) {
-        const dx = (Math.random() - 0.5) * shakeIntensity;
-        const dy = (Math.random() - 0.5) * shakeIntensity;
-        ctx.translate(dx, dy);
+        ctx.translate((Math.random() - 0.5) * shakeIntensity, (Math.random() - 0.5) * shakeIntensity);
         shakeIntensity *= 0.85;
         if (shakeIntensity < 0.5) shakeIntensity = 0;
       }
 
-      // Render Background
+      // Background
       ctx.fillStyle = "#0c0c16";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Render Giant Moon
+      // Moon
       ctx.fillStyle = "#fff5e6";
       ctx.shadowColor = "rgba(255, 230, 180, 0.4)";
       ctx.shadowBlur = 80;
       ctx.beginPath();
       ctx.arc(canvas.width / 2, 180, 120, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0; // reset shadow
+      ctx.shadowBlur = 0;
 
-      // Silhouette mountains
+      // Silhouette
       ctx.fillStyle = "#06060c";
       ctx.beginPath();
       ctx.moveTo(0, groundY);
-      ctx.lineTo(200, 320);
-      ctx.lineTo(450, 420);
-      ctx.lineTo(700, 290);
-      ctx.lineTo(1024, groundY);
+      ctx.lineTo(200, 320); ctx.lineTo(450, 420); ctx.lineTo(700, 290); ctx.lineTo(1024, groundY);
       ctx.closePath();
       ctx.fill();
 
-      // Render Ground
+      // Ground
       ctx.fillStyle = "#11111d";
       ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
       ctx.fillStyle = "#ff3b3f";
       ctx.fillRect(0, groundY, canvas.width, 4);
 
-      // Cherry Petals drift
+      // Cherry petals
       ctx.fillStyle = "rgba(255, 182, 193, 0.7)";
-      cherryPetals.forEach((petal) => {
-        petal.x += petal.speedX;
-        petal.y += petal.speedY;
-        petal.angle += petal.spinSpeed;
-        if (petal.x < -10) petal.x = canvas.width + 10;
-        if (petal.y > canvas.height) {
-          petal.y = -10;
-          petal.x = Math.random() * canvas.width;
-        }
-
-        ctx.save();
-        ctx.translate(petal.x, petal.y);
-        ctx.rotate(petal.angle);
-        ctx.fillRect(-petal.size / 2, -petal.size / 2, petal.size, petal.size / 1.5);
+      cherryPetals.forEach((p) => {
+        p.x += p.speedX; p.y += p.speedY; p.angle += p.spinSpeed;
+        if (p.x < -10) p.x = canvas.width + 10;
+        if (p.y > canvas.height) { p.y = -10; p.x = Math.random() * canvas.width; }
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size / 1.5);
         ctx.restore();
       });
 
-      // Update Player 1 Mechanics
-      if (!roundEnded && gameActive) {
-        // Horizontal Movement
-        p1.vx = 0;
-        if (keys["a"] || keys["ㅁ"]) {
-          p1.vx = -5;
-          p1.facingLeft = true;
-        }
-        if (keys["d"] || keys["ㅇ"]) {
-          p1.vx = 5;
-          p1.facingLeft = false;
-        }
+      // ── Local player (me) logic ──
+      if (!roundEnded) {
+        me.vx = 0;
+        if (keys["a"] || keys["ㅁ"]) { me.vx = -5; me.facingLeft = true; }
+        if (keys["d"] || keys["ㅇ"]) { me.vx = 5; me.facingLeft = false; }
+        if ((keys["w"] || keys["ㅈ"]) && me.isGrounded) { me.vy = -12; me.isGrounded = false; }
 
-        // Jump
-        if ((keys["w"] || keys["ㅈ"]) && p1.isGrounded) {
-          p1.vy = -12;
-          p1.isGrounded = false;
+        me.isBlocking = (keys["f"] || keys["ㄹ"]) && !me.isGroggy;
+
+        if (keys["shift"] && me.dashCooldown <= 0 && me.dashTimer <= 0) {
+          me.dashTimer = 8; me.dashCooldown = 50;
+          me.vx = me.facingLeft ? -16 : 16;
         }
-
-        // Guard / Defense (F)
-        p1.isBlocking = (keys["f"] || keys["ㄹ"]) && !p1.isGroggy;
-
-        // Dash (Shift)
-        if (keys["shift"] && p1.dashCooldown <= 0 && p1.dashTimer <= 0) {
-          p1.dashTimer = 8;
-          p1.dashCooldown = 50;
-          p1.vx = p1.facingLeft ? -16 : 16;
-        }
-
-        // Attack (Click)
-        if (keys["click"] && p1.attackCooldown <= 0 && !p1.isBlocking && !p1.isGroggy) {
-          p1.isAttacking = true;
-          p1.attackProgress = 0;
-          p1.attackCooldown = 35;
+        if (keys["click"] && me.attackCooldown <= 0 && !me.isBlocking && !me.isGroggy) {
+          me.isAttacking = true; me.attackProgress = 0; me.attackCooldown = 35;
           sfx.playSlash();
         }
       }
 
-      // Physics & Timers (P1)
-      p1.vy += 0.6; // Gravity
-      p1.x += p1.vx;
-      p1.y += p1.vy;
-
-      if (p1.y >= groundY - p1.height) {
-        p1.y = groundY - p1.height;
-        p1.vy = 0;
-        p1.isGrounded = true;
+      // Physics
+      me.vy += 0.6;
+      me.x += me.vx; me.y += me.vy;
+      if (me.y >= groundY - me.height) { me.y = groundY - me.height; me.vy = 0; me.isGrounded = true; }
+      me.x = Math.max(0, Math.min(canvas.width - me.width, me.x));
+      if (me.attackCooldown > 0) me.attackCooldown--;
+      if (me.dashCooldown > 0) me.dashCooldown--;
+      if (me.dashTimer > 0) {
+        me.dashTimer--;
+        ctx.fillStyle = me.color.replace(")", ", 0.25)").replace("rgb", "rgba");
+        ctx.fillRect(me.x, me.y, me.width, me.height);
       }
-      p1.x = Math.max(0, Math.min(canvas.width - p1.width, p1.x));
-
-      if (p1.attackCooldown > 0) p1.attackCooldown--;
-      if (p1.dashCooldown > 0) p1.dashCooldown--;
-
-      if (p1.dashTimer > 0) {
-        p1.dashTimer--;
-        // Shadow trail effect
-        ctx.fillStyle = "rgba(255, 59, 63, 0.25)";
-        ctx.fillRect(p1.x, p1.y, p1.width, p1.height);
+      if (me.isAttacking) {
+        me.attackProgress += 1 / me.attackDuration;
+        if (me.attackProgress >= 1) { me.isAttacking = false; me.attackProgress = 0; }
       }
 
-      // P1 Attack progress
-      if (p1.isAttacking) {
-        p1.attackProgress += 1 / p1.attackDuration;
-        if (p1.attackProgress >= 1) {
-          p1.isAttacking = false;
-          p1.attackProgress = 0;
+      // Guard instability
+      if (me.isBlocking) {
+        me.instability = Math.min(100, me.instability + 1.2);
+        if (me.instability >= 100) {
+          me.isGroggy = true; me.groggyTimer = 90; me.isBlocking = false;
+          sfx.playBreak(); triggerShake(12);
         }
-      }
-
-      // P1 Guard Instability logic
-      if (p1.isBlocking) {
-        p1.instability = Math.min(100, p1.instability + 1.2);
-        if (p1.instability >= 100) {
-          p1.isGroggy = true;
-          p1.groggyTimer = 90; // Stun for 1.5s
-          p1.isBlocking = false;
-          sfx.playBreak();
-          triggerShake(12);
-        }
+      } else if (me.isGroggy) {
+        me.groggyTimer--;
+        if (me.groggyTimer <= 0) { me.isGroggy = false; me.instability = 0; }
       } else {
-        if (p1.isGroggy) {
-          p1.groggyTimer--;
-          if (p1.groggyTimer <= 0) {
-            p1.isGroggy = false;
-            p1.instability = 0;
-          }
-        } else {
-          p1.instability = Math.max(0, p1.instability - 0.4);
-        }
+        me.instability = Math.max(0, me.instability - 0.4);
       }
 
-      // Update Player 2 (AI) Mechanics
-      updateAI();
+      // Send state every 2 frames
+      sendTick++;
+      if (sendTick % 2 === 0) sendState();
 
-      // Physics & Timers (P2)
-      p2.vy += 0.6; // Gravity
-      p2.x += p2.vx;
-      p2.y += p2.vy;
+      // Hit detection (I check if MY sword hits opponent)
+      detectHit();
 
-      if (p2.y >= groundY - p2.height) {
-        p2.y = groundY - p2.height;
-        p2.vy = 0;
-        p2.isGrounded = true;
-      }
-      p2.x = Math.max(0, Math.min(canvas.width - p2.width, p2.x));
-
-      if (p2.attackCooldown > 0) p2.attackCooldown--;
-      if (p2.dashCooldown > 0) p2.dashCooldown--;
-
-      if (p2.dashTimer > 0) {
-        p2.dashTimer--;
-        ctx.fillStyle = "rgba(0, 229, 255, 0.25)";
-        ctx.fillRect(p2.x, p2.y, p2.width, p2.height);
-      }
-
-      if (p2.isAttacking) {
-        p2.attackProgress += 1 / p2.attackDuration;
-        if (p2.attackProgress >= 1) {
-          p2.isAttacking = false;
-          p2.attackProgress = 0;
-        }
-      }
-
-      // P2 Guard Instability logic
-      if (p2.isBlocking) {
-        p2.instability = Math.min(100, p2.instability + 1.2);
-        if (p2.instability >= 100) {
-          p2.isGroggy = true;
-          p2.groggyTimer = 90;
-          p2.isBlocking = false;
-          sfx.playBreak();
-          triggerShake(12);
-        }
-      } else {
-        if (p2.isGroggy) {
-          p2.groggyTimer--;
-          if (p2.groggyTimer <= 0) {
-            p2.isGroggy = false;
-            p2.instability = 0;
-          }
-        } else {
-          p2.instability = Math.max(0, p2.instability - 0.4);
-        }
-      }
-
-      // Sync instability states with React HUD (throttled/state)
-      setP1Instability(Math.round(p1.instability));
-      setP2Instability(Math.round(p2.instability));
-
-      // HITBOX DETECTIONS & COMBAT COLLISION
-      const detectHit = (attacker: typeof p1, defender: typeof p1) => {
-        if (!attacker.isAttacking || roundEnded) return;
-
-        // Attacker sword slash range
-        const reach = 85 + skinInfo.lengthBonus;
-        const swordX = attacker.facingLeft ? attacker.x - reach : attacker.x + attacker.width;
-        const swordW = reach;
-
-        // Check if defender overlaps the sword zone
-        const swordBox = { x: swordX, y: attacker.y + 10, w: swordW, h: attacker.height - 10 };
-        const defenderBox = { x: defender.x, y: defender.y, w: defender.width, h: defender.height };
-
-        const isOverlapping =
-          swordBox.x < defenderBox.x + defenderBox.w &&
-          swordBox.x + swordBox.w > defenderBox.x &&
-          swordBox.y < defenderBox.y + defenderBox.h &&
-          swordBox.y + swordBox.h > defenderBox.y;
-
-        if (isOverlapping && attacker.attackProgress > 0.1 && attacker.attackProgress < 0.6) {
-          // Defend checked
-          if (defender.isBlocking) {
-            // Guarded! Increment defender's instability
-            defender.instability = Math.min(100, defender.instability + 22);
-            attacker.isAttacking = false; // Stop attack
-            createSparks(
-              defender.facingLeft ? defender.x : defender.x + defender.width,
-              attacker.y + 35,
-              "#ffffff"
-            );
-            sfx.playClash();
-            triggerShake(5);
-          } else {
-            // Dead!
-            createBlood(defender.x + defender.width / 2, defender.y + defender.height / 3);
-            triggerShake(20);
-            roundEnded = true;
-
-            if (attacker === p1) {
-              matchWinner = "p1";
-              sfx.playWin();
-            } else {
-              matchWinner = "p2";
-              sfx.playLose();
-            }
-
-            const winTime = (Date.now() - startTime) / 1000;
-            setTimeout(() => {
-              onGameEnd(matchWinner!, winTime);
-            }, 1000);
-          }
-        }
-      };
-
-      if (!roundEnded) {
-        detectHit(p1, p2);
-        detectHit(p2, p1);
-      }
-
-      // RENDER CHARACTERS
-
-      // Player 1 (Red Samurai)
-      ctx.fillStyle = p1.isGroggy ? "#553333" : p1.color;
-      ctx.fillRect(p1.x, p1.y, p1.width, p1.height);
-      // Sword rendering (Red Samurai)
-      if (p1.isAttacking) {
+      // ── Render Me ──
+      ctx.fillStyle = me.isGroggy ? (isP1 ? "#553333" : "#333355") : me.color;
+      ctx.fillRect(me.x, me.y, me.width, me.height);
+      if (me.isAttacking) {
         ctx.strokeStyle = skinInfo.color;
         ctx.lineWidth = skinInfo.width;
         ctx.beginPath();
-        const angle = p1.facingLeft
-          ? Math.PI - p1.attackProgress * Math.PI
-          : p1.attackProgress * Math.PI;
-        const swordLen = 50 + skinInfo.lengthBonus;
-        ctx.moveTo(p1.x + p1.width / 2, p1.y + p1.height / 2);
-        ctx.lineTo(
-          p1.x + p1.width / 2 + Math.cos(angle) * swordLen,
-          p1.y + p1.height / 2 + Math.sin(angle) * swordLen
-        );
+        const ang = me.facingLeft ? Math.PI - me.attackProgress * Math.PI : me.attackProgress * Math.PI;
+        const sLen = 50 + skinInfo.lengthBonus;
+        ctx.moveTo(me.x + me.width / 2, me.y + me.height / 2);
+        ctx.lineTo(me.x + me.width / 2 + Math.cos(ang) * sLen, me.y + me.height / 2 + Math.sin(ang) * sLen);
         ctx.stroke();
-      } else if (p1.isBlocking) {
-        // Shield bubble
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+      } else if (me.isBlocking) {
+        ctx.strokeStyle = isP1 ? "rgba(255, 59, 63, 0.4)" : "rgba(0, 229, 255, 0.4)";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(p1.x + (p1.facingLeft ? 0 : p1.width), p1.y + p1.height / 2, 45, -Math.PI / 2, Math.PI / 2, p1.facingLeft);
+        ctx.arc(me.x + (me.facingLeft ? 0 : me.width), me.y + me.height / 2, 45, -Math.PI / 2, Math.PI / 2, me.facingLeft);
         ctx.stroke();
       }
 
-      // Player 2 (Blue Samurai / AI)
-      ctx.fillStyle = p2.isGroggy ? "#333355" : p2.color;
-      ctx.fillRect(p2.x, p2.y, p2.width, p2.height);
-      // Sword rendering (Blue Samurai)
-      if (p2.isAttacking) {
+      // ── Render Opponent ──
+      ctx.fillStyle = opp.isGroggy ? (isP1 ? "#333355" : "#553333") : opp.color;
+      ctx.fillRect(opp.x, opp.y, opp.width, opp.height);
+      if (opp.isAttacking) {
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 3;
         ctx.beginPath();
-        const angle = p2.facingLeft
-          ? Math.PI - p2.attackProgress * Math.PI
-          : p2.attackProgress * Math.PI;
-        ctx.moveTo(p2.x + p2.width / 2, p2.y + p2.height / 2);
-        ctx.lineTo(
-          p2.x + p2.width / 2 + Math.cos(angle) * 50,
-          p2.y + p2.height / 2 + Math.sin(angle) * 50
-        );
+        const ang2 = opp.facingLeft ? Math.PI - opp.attackProgress * Math.PI : opp.attackProgress * Math.PI;
+        ctx.moveTo(opp.x + opp.width / 2, opp.y + opp.height / 2);
+        ctx.lineTo(opp.x + opp.width / 2 + Math.cos(ang2) * 50, opp.y + opp.height / 2 + Math.sin(ang2) * 50);
         ctx.stroke();
-      } else if (p2.isBlocking) {
-        ctx.strokeStyle = "rgba(0, 229, 255, 0.4)";
+      } else if (opp.isBlocking) {
+        ctx.strokeStyle = isP1 ? "rgba(0, 229, 255, 0.4)" : "rgba(255, 59, 63, 0.4)";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(p2.x + (p2.facingLeft ? 0 : p2.width), p2.y + p2.height / 2, 45, -Math.PI / 2, Math.PI / 2, p2.facingLeft);
+        ctx.arc(opp.x + (opp.facingLeft ? 0 : opp.width), opp.y + opp.height / 2, 45, -Math.PI / 2, Math.PI / 2, opp.facingLeft);
         ctx.stroke();
       }
 
-      // RENDER PARTICLES
+      // Name tags
+      ctx.font = "bold 13px Outfit, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = me.color;
+      ctx.fillText(playerName, me.x + me.width / 2, me.y - 10);
+      ctx.fillStyle = opp.color;
+      ctx.fillText(opponentName, opp.x + opp.width / 2, opp.y - 10);
+
+      // Particles
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life++;
+        p.x += p.vx; p.y += p.vy; p.life++;
         ctx.fillStyle = p.color;
         ctx.fillRect(p.x, p.y, p.size, p.size);
-        if (p.life >= p.maxLife) {
-          particles.splice(i, 1);
-        }
+        if (p.life >= p.maxLife) particles.splice(i, 1);
       }
+
+      // Sync instability to HUD
+      if (isP1) { setP1Instability(Math.round(me.instability)); setP2Instability(Math.round(opp.instability)); }
+      else { setP1Instability(Math.round(opp.instability)); setP2Instability(Math.round(me.instability)); }
 
       ctx.restore();
       animationFrameId = requestAnimationFrame(tick);
@@ -606,12 +399,13 @@ export default function GameCanvas({
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("mousedown", handleMouseDown);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+      socket.close();
     };
-  }, [equippedSkin, difficulty, gameActive]);
+  }, [equippedSkin, roomId, yourSide]);
 
   return (
     <div className="relative w-full h-full">
@@ -621,49 +415,26 @@ export default function GameCanvas({
         height={576}
         className="w-full h-full block rounded-xl border border-[rgba(255,255,255,0.06)] shadow-[0_20px_50px_rgba(0,0,0,0.8)]"
       />
-
-      {/* Instability HUD rendered on-top overlay */}
-      {gameActive && (
-        <div className="absolute top-6 left-12 right-12 flex justify-between pointer-events-none z-10 font-mono">
-          {/* P1 Instability */}
-          <div className="flex flex-col gap-1 w-52">
-            <div className="flex justify-between text-xs font-bold tracking-widest text-[#ff3b3f]">
-              <span>P1 POSTURE</span>
-              <span>{p1Instability}%</span>
-            </div>
-            <div className="h-2 w-full bg-[rgba(255,255,255,0.1)] rounded-full overflow-hidden border border-[rgba(255,59,63,0.2)]">
-              <div
-                className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-75"
-                style={{ width: `${p1Instability}%` }}
-              />
-            </div>
-            {p1Instability >= 100 && (
-              <span className="text-[10px] text-red-500 font-bold tracking-widest animate-pulse mt-0.5">
-                ★ 가드 해제 (GROGGY)
-              </span>
-            )}
+      <div className="absolute top-6 left-12 right-12 flex justify-between pointer-events-none z-10 font-mono">
+        <div className="flex flex-col gap-1 w-52">
+          <div className="flex justify-between text-xs font-bold tracking-widest text-[#ff3b3f]">
+            <span>P1 POSTURE</span><span>{p1Instability}%</span>
           </div>
-
-          {/* P2 Instability */}
-          <div className="flex flex-col gap-1 w-52 items-end">
-            <div className="flex justify-between w-full text-xs font-bold tracking-widest text-[#00e5ff]">
-              <span>{p2Instability}%</span>
-              <span>OPPONENT POSTURE</span>
-            </div>
-            <div className="h-2 w-full bg-[rgba(255,255,255,0.1)] rounded-full overflow-hidden border border-[rgba(0,229,255,0.2)]">
-              <div
-                className="h-full bg-gradient-to-l from-cyan-500 to-cyan-300 transition-all duration-75 float-right"
-                style={{ width: `${p2Instability}%` }}
-              />
-            </div>
-            {p2Instability >= 100 && (
-              <span className="text-[10px] text-cyan-400 font-bold tracking-widest animate-pulse mt-0.5">
-                ★ 가드 해제 (GROGGY)
-              </span>
-            )}
+          <div className="h-2 w-full bg-[rgba(255,255,255,0.1)] rounded-full overflow-hidden border border-[rgba(255,59,63,0.2)]">
+            <div className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-75" style={{ width: `${p1Instability}%` }} />
           </div>
+          {p1Instability >= 100 && <span className="text-[10px] text-red-500 font-bold tracking-widest animate-pulse mt-0.5">★ 가드 해제 (GROGGY)</span>}
         </div>
-      )}
+        <div className="flex flex-col gap-1 w-52 items-end">
+          <div className="flex justify-between w-full text-xs font-bold tracking-widest text-[#00e5ff]">
+            <span>{p2Instability}%</span><span>P2 POSTURE</span>
+          </div>
+          <div className="h-2 w-full bg-[rgba(255,255,255,0.1)] rounded-full overflow-hidden border border-[rgba(0,229,255,0.2)]">
+            <div className="h-full bg-gradient-to-l from-cyan-500 to-cyan-300 transition-all duration-75 float-right" style={{ width: `${p2Instability}%` }} />
+          </div>
+          {p2Instability >= 100 && <span className="text-[10px] text-cyan-400 font-bold tracking-widest animate-pulse mt-0.5">★ 가드 해제 (GROGGY)</span>}
+        </div>
+      </div>
     </div>
   );
 }

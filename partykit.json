@@ -1,0 +1,5 @@
+{
+  "name": "slaaash-game",
+  "main": "party/game.ts",
+  "compatibilityDate": "2023-11-01"
+}
