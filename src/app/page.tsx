@@ -52,14 +52,7 @@ export default function Home() {
     if (savedRankings) {
       setLeaderboard(JSON.parse(savedRankings));
     } else {
-      // Default placeholder rankings
-      const defaultRankings = [
-        { name: "검성 신짱", time: 1.84, date: "2026-07-10" },
-        { name: "무사 박씨", time: 2.95, date: "2026-07-12" },
-        { name: "훈련병 최씨", time: 5.22, date: "2026-07-14" },
-      ];
-      localStorage.setItem("slaaash_rankings", JSON.stringify(defaultRankings));
-      setLeaderboard(defaultRankings);
+      setLeaderboard([]);
     }
 
     // 2. Active login session check
@@ -114,9 +107,13 @@ export default function Home() {
     setMatchingState("matching");
     setRoundResult(null);
 
-    // Randomize opponent
+    // Randomize opponent and their skill level to simulate online matchmaking
     const name = OPPONENT_NAMES[Math.floor(Math.random() * OPPONENT_NAMES.length)];
     setMatchOpponent(name);
+
+    const levels: ("easy" | "normal" | "hard")[] = ["easy", "normal", "hard"];
+    const randomLevel = levels[Math.floor(Math.random() * levels.length)];
+    setDifficulty(randomLevel);
 
     setTimeout(() => {
       setMatchingState("playing");
@@ -229,7 +226,6 @@ export default function Home() {
               <h1 className="text-7xl font-extrabold tracking-[0.6rem] text-transparent bg-clip-text bg-gradient-to-r from-white via-red-500 to-amber-500 premium-glow-red font-title">
                 SLAAASH
               </h1>
-              <p className="text-xs font-bold tracking-[0.5rem] text-neutral-500 mt-2 font-serif">일 격 필 살</p>
             </div>
 
             {/* Content Mid Area: Controls / Rankings */}
@@ -240,45 +236,46 @@ export default function Home() {
                   🏆 명예의 전당 (최단 승리 기록)
                 </span>
                 <div className="flex flex-col gap-1.5 text-xs">
-                  {leaderboard.map((entry, idx) => (
-                    <div key={idx} className="flex justify-between border-b border-white/5 pb-1">
-                      <span className="text-neutral-300 font-semibold">
-                        {idx + 1}. {entry.name}
-                      </span>
-                      <span className="text-red-400 font-extrabold font-mono">{entry.time.toFixed(2)}초</span>
-                    </div>
-                  ))}
+                  {leaderboard.length === 0 ? (
+                    <div className="text-center text-neutral-500 py-8 font-serif">기록이 없습니다. 첫 승리를 차지하세요!</div>
+                  ) : (
+                    leaderboard.map((entry, idx) => (
+                      <div key={idx} className="flex justify-between border-b border-white/5 pb-1">
+                        <span className="text-neutral-300 font-semibold">
+                          {idx + 1}. {entry.name}
+                        </span>
+                        <span className="text-red-400 font-extrabold font-mono">{entry.time.toFixed(2)}초</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
-              {/* Game Settings & Guide */}
-              <div className="w-1/2 bg-[rgba(15,15,25,0.7)] backdrop-blur-md border border-[rgba(255,255,255,0.06)] rounded-xl p-4 flex flex-col justify-between">
-                <div>
-                  <span className="text-xs font-black tracking-wider text-neutral-400 mb-2 block">
-                    ⚙️ 난이도 설정 (AI 무사 등급)
-                  </span>
-                  <div className="flex gap-2">
-                    {(["easy", "normal", "hard"] as const).map((lvl) => (
-                      <button
-                        key={lvl}
-                        onClick={() => setDifficulty(lvl)}
-                        className={`flex-1 text-xs py-1.5 rounded font-bold border capitalize transition ${
-                          difficulty === lvl
-                            ? "bg-amber-500/10 border-amber-500 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
-                            : "bg-transparent border-white/10 text-neutral-500 hover:text-neutral-300"
-                        }`}
-                      >
-                        {lvl === "easy" ? "훈련병" : lvl === "normal" ? "무사" : "검성"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-neutral-400 mt-2 bg-black/35 p-2 rounded border border-white/5">
+              {/* Game Guide */}
+              <div className="w-1/2 bg-[rgba(15,15,25,0.7)] backdrop-blur-md border border-[rgba(255,255,255,0.06)] rounded-xl p-4 flex flex-col justify-between overflow-y-auto">
+                <span className="text-xs font-black tracking-wider text-neutral-400 mb-2 block">
+                  ⚔️ 조작 가이드
+                </span>
+                <div className="text-[11px] text-neutral-300 space-y-1.5 bg-black/35 p-3 rounded-lg border border-white/5 font-mono">
                   <div className="flex justify-between">
-                    <span>좌우 이동: <span className="key-cap">A</span> / <span className="key-cap">D</span></span>
-                    <span>방어: <span className="key-cap">F</span></span>
-                    <span>베기: <span className="key-cap">클릭</span></span>
+                    <span className="text-neutral-500">좌우 이동</span>
+                    <span><span className="key-cap">A</span> / <span className="key-cap">D</span></span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-500">점프</span>
+                    <span><span className="key-cap">W</span></span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-500">대시 (돌진)</span>
+                    <span><span className="key-cap">Shift</span></span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-500">방어 (가드)</span>
+                    <span><span className="key-cap">F</span></span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-500">베기 (공격)</span>
+                    <span><span className="key-cap">클릭</span></span>
                   </div>
                 </div>
               </div>
@@ -371,35 +368,44 @@ export default function Home() {
             >
               ✕
             </button>
-            <h3 className="text-xl font-black text-white mb-6">구글 계정으로 로그인</h3>
+            <h3 className="text-xl font-black text-white mb-6">Google 계정으로 로그인</h3>
             
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={() => handleGoogleLogin("musanim@gmail.com", "검객 무사님")}
-                className="flex items-center gap-3 w-full justify-center py-2.5 px-4 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-lg text-sm transition"
-              >
-                <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center font-bold text-xs text-white">무</div>
-                검객 무사님으로 로그인 (musanim@gmail.com)
-              </button>
+            <div className="flex flex-col gap-4">
+              <div className="text-left">
+                <label className="text-[10px] text-neutral-400 font-bold block mb-1">구글 닉네임</label>
+                <input
+                  type="text"
+                  placeholder="예: 무사 홍길동"
+                  id="login-name"
+                  defaultValue="구글 무사"
+                  className="w-full py-2.5 px-3 rounded-lg bg-black/45 border border-white/10 text-white text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="text-left">
+                <label className="text-[10px] text-neutral-400 font-bold block mb-1">구글 이메일</label>
+                <input
+                  type="email"
+                  placeholder="예: name@gmail.com"
+                  id="login-email"
+                  defaultValue="user@gmail.com"
+                  className="w-full py-2.5 px-3 rounded-lg bg-black/45 border border-white/10 text-white text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
 
               <button
-                onClick={() => handleGoogleLogin("swpar@gmail.com", "Slaaash 달인")}
-                className="flex items-center gap-3 w-full justify-center py-2.5 px-4 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-lg text-sm transition"
+                onClick={() => {
+                  const nameEl = document.getElementById("login-name") as HTMLInputElement;
+                  const emailEl = document.getElementById("login-email") as HTMLInputElement;
+                  handleGoogleLogin(emailEl.value || "user@gmail.com", nameEl.value || "구글 무사");
+                }}
+                className="flex items-center gap-2.5 justify-center w-full py-2.5 bg-white text-black font-extrabold rounded-lg text-sm transition hover:bg-neutral-100 mt-2"
               >
-                <div className="w-6 h-6 bg-amber-500 rounded-full flex items-center justify-center font-bold text-xs text-white">달</div>
-                Slaaash 달인으로 로그인 (swpar@gmail.com)
-              </button>
-
-              <button
-                onClick={() => handleGoogleLogin("newbie@gmail.com", "새싹 무사")}
-                className="flex items-center gap-3 w-full justify-center py-2.5 px-4 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-lg text-sm transition"
-              >
-                <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center font-bold text-xs text-white">새</div>
-                새싹 무사로 로그인 (newbie@gmail.com)
+                Google 계정으로 로그인
               </button>
             </div>
             <p className="text-[10px] text-neutral-500 mt-4 leading-relaxed">
-              * 실제 OAuth Client 설정 없이 작동하는 가상 로그인 창입니다. 로그인 정보를 로컬 스토리지에 안전하게 보관하여 전적과 스킨이 유지됩니다.
+              * 별도의 서버 설정 없이 작동하는 가상 로그인 창입니다. 로그인 정보를 로컬 스토리지에 안전하게 보관하여 전적과 스킨이 유지됩니다.
             </p>
           </div>
         </div>
