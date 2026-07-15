@@ -22,8 +22,14 @@ interface LeaderboardEntry {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PARTYKIT_HOST =
-  process.env.NEXT_PUBLIC_PARTYKIT_HOST || "slaaash-game.YOUR_ACCOUNT.partykit.dev";
+const getPartyKitHost = () => {
+  if (typeof window !== "undefined") {
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return "localhost:1999";
+    }
+  }
+  return process.env.NEXT_PUBLIC_PARTYKIT_HOST || "slaaash-game.YOUR_ACCOUNT.partykit.dev";
+};
 
 const MATCHMAKING_ROOM = "lobby"; // global lobby room everyone joins to be matched
 
@@ -100,7 +106,7 @@ export default function Home() {
     // Dynamic import to avoid SSR/Node.js trying to access WebSocket
     const { default: PartySocket } = await import("partysocket");
 
-    const socket = new PartySocket({ host: PARTYKIT_HOST, room: MATCHMAKING_ROOM });
+    const socket = new PartySocket({ host: getPartyKitHost(), room: MATCHMAKING_ROOM });
     lobbySocketRef.current = socket;
 
     socket.onopen = () => {
@@ -242,7 +248,7 @@ export default function Home() {
               <div className="w-1/2 bg-[rgba(15,15,25,0.7)] backdrop-blur-md border border-[rgba(255,255,255,0.06)] rounded-xl p-4 flex flex-col justify-between overflow-y-auto">
                 <span className="text-xs font-black tracking-wider text-neutral-400 mb-2 block">⚔️ 조작 가이드</span>
                 <div className="text-[11px] text-neutral-300 space-y-1.5 bg-black/35 p-3 rounded-lg border border-white/5 font-mono">
-                  {[["좌우 이동","A / D"], ["점프","W"], ["대시 (돌진)","Shift"], ["방어 (가드)","F"], ["베기 (공격)","클릭"]].map(([label, key]) => (
+                  {[["좌우 이동","A / D"], ["방어 (가드)","F"], ["베기 (공격)","클릭"]].map(([label, key]) => (
                     <div key={label} className="flex justify-between">
                       <span className="text-neutral-500">{label}</span>
                       <span className="key-cap">{key}</span>

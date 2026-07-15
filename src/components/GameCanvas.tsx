@@ -25,9 +25,14 @@ export const SKINS_DATA: Record<
   legendary: { name: "전설의 명검", color: "#ffb700", trailColor: "rgba(255, 220, 0, 0.6)", lengthBonus: 30, width: 7 },
 };
 
-// PARTYKIT host – in dev, use localhost:1999, in prod, use the deployed URL
-const PARTYKIT_HOST =
-  process.env.NEXT_PUBLIC_PARTYKIT_HOST || "slaaash-game.YOUR_ACCOUNT.partykit.dev";
+const getPartyKitHost = () => {
+  if (typeof window !== "undefined") {
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return "localhost:1999";
+    }
+  }
+  return process.env.NEXT_PUBLIC_PARTYKIT_HOST || "slaaash-game.YOUR_ACCOUNT.partykit.dev";
+};
 
 export default function GameCanvas({
   equippedSkin,
@@ -136,7 +141,7 @@ export default function GameCanvas({
     const startTime = Date.now();
 
     // ─── WebSocket ────────────────────────────────────────────────────────────
-    const socket = new PartySocket({ host: PARTYKIT_HOST, room: roomId });
+    const socket = new PartySocket({ host: getPartyKitHost(), room: roomId });
     socketRef.current = socket;
 
     socket.onmessage = (evt) => {
