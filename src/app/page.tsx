@@ -216,7 +216,7 @@ export default function Home() {
             </div>
             <div className="flex flex-col">
               <span className="text-xs text-neutral-400 font-bold">{user.name}</span>
-              <span className="text-sm font-black text-amber-400">🪙 {user.coins} 냥</span>
+              <span className="text-sm font-black text-amber-400">🪙 {user.coins} 원</span>
             </div>
             <button onClick={handleLogout} className="ml-3 text-[10px] text-red-400 hover:text-red-300 font-bold border border-red-500/20 px-2 py-1 rounded hover:bg-red-500/10 transition">
               로그아웃
@@ -353,7 +353,7 @@ export default function Home() {
                 </p>
                 {iWon && (
                   <p className="text-xs text-amber-400 font-bold mt-1">
-                    🪙 {Math.max(10, Math.floor(1000 / Math.max(1.0, roundResult.time)))} 냥 획득!
+                    🪙 {Math.max(10, Math.floor(1000 / Math.max(1.0, roundResult.time)))} 원 획득!
                   </p>
                 )}
               </>
@@ -411,7 +411,7 @@ export default function Home() {
             <button onClick={() => setShowShop(false)} className="absolute top-4 right-4 text-neutral-400 hover:text-white font-bold text-lg">✕</button>
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-2xl font-black text-white">🌸 대장간 상점 (검 스킨)</h3>
-              {user && <span className="text-amber-400 font-extrabold">🪙 {user.coins} 냥</span>}
+              {user && <span className="text-amber-400 font-extrabold">🪙 {user.coins} 원</span>}
             </div>
 
             {!user ? (
@@ -445,7 +445,7 @@ export default function Home() {
                         ) : (
                           <button onClick={() => buySkin(id, cost)} disabled={user.coins < cost}
                             className={`w-full text-xs font-bold py-1.5 rounded transition ${user.coins >= cost ? "bg-amber-500 hover:bg-amber-400 text-black font-extrabold" : "bg-neutral-800 text-neutral-500 cursor-not-allowed"}`}>
-                            구매하기 (🪙 {cost} 냥)
+                            구매하기 (🪙 {cost} 원)
                           </button>
                         )}
                       </div>
