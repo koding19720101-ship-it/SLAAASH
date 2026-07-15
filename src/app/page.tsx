@@ -49,6 +49,7 @@ export default function Home() {
   const [yourSide, setYourSide] = useState<"p1" | "p2">("p1");
   const [opponentName, setOpponentName] = useState("");
   const [queueCount, setQueueCount] = useState(0);
+  const [matchmakingStatus, setMatchmakingStatus] = useState<"connecting" | "waiting" | "failed">("connecting");
   const [roundResult, setRoundResult] = useState<{ winner: "p1" | "p2"; time: number } | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,6 +102,7 @@ export default function Home() {
   const startMatchmaking = async () => {
     setPhase("matching");
     setQueueCount(1);
+    setMatchmakingStatus("connecting");
     setRoundResult(null);
 
     // Dynamic import to avoid SSR/Node.js trying to access WebSocket
@@ -109,8 +111,17 @@ export default function Home() {
     const socket = new PartySocket({ host: getPartyKitHost(), room: MATCHMAKING_ROOM });
     lobbySocketRef.current = socket;
 
+    // Timeout to detect connection failure (e.g. 3.5 seconds)
+    const connTimeout = setTimeout(() => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        setMatchmakingStatus("failed");
+      }
+    }, 3500);
+
     socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "join", name: user?.name ?? "무명 무사" }));
+      clearTimeout(connTimeout);
+      setMatchmakingStatus("waiting");
+      socket.send(JSON.stringify({ type: "join", name: user?.name ?? "무명 플레이어" }));
     };
 
     socket.onmessage = (evt) => {
@@ -121,6 +132,7 @@ export default function Home() {
       }
 
       if (msg.type === "matched") {
+        clearTimeout(connTimeout);
         socket.close();
         lobbySocketRef.current = null;
         setOpponentName(msg.opponentName);
@@ -129,6 +141,15 @@ export default function Home() {
         gameKey.current += 1;
         setPhase("playing");
       }
+    };
+
+    socket.onerror = () => {
+      clearTimeout(connTimeout);
+      setMatchmakingStatus("failed");
+    };
+
+    socket.onclose = () => {
+      clearTimeout(connTimeout);
     };
   };
 
@@ -272,9 +293,31 @@ export default function Home() {
         {/* ── MATCHMAKING QUEUE ── */}
         {phase === "matching" && (
           <div className="absolute inset-0 flex flex-col justify-center items-center bg-black/95 z-10 gap-4">
-            <div className="w-16 h-16 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
-            <h2 className="text-2xl font-bold tracking-widest text-white animate-pulse">상대를 찾는 중...</h2>
-            <p className="text-xs text-neutral-400 font-serif">현재 대기 중인 무사: {queueCount}명</p>
+            {matchmakingStatus === "connecting" && (
+              <>
+                <div className="w-16 h-16 border-4 border-neutral-600 border-t-transparent rounded-full animate-spin" />
+                <h2 className="text-2xl font-bold tracking-widest text-white animate-pulse">매칭 서버 연결 중...</h2>
+              </>
+            )}
+            {matchmakingStatus === "waiting" && (
+              <>
+                <div className="w-16 h-16 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+                <h2 className="text-2xl font-bold tracking-widest text-white animate-pulse">상대를 찾는 중...</h2>
+                <p className="text-xs text-neutral-400 font-serif">현재 대기 중인 플레이어: {queueCount}명</p>
+                <p className="text-[10px] text-neutral-500 max-w-md text-center mt-2 px-6">
+                  * 다른 브라우저 탭이나 시크릿 창을 열어 동일 주소로 접속하면 매칭이 완료됩니다.
+                </p>
+              </>
+            )}
+            {matchmakingStatus === "failed" && (
+              <>
+                <div className="w-12 h-12 flex items-center justify-center rounded-full bg-red-950 border border-red-500 text-red-500 text-xl font-bold">!</div>
+                <h2 className="text-xl font-bold text-red-500">매칭 서버 연결 실패</h2>
+                <p className="text-xs text-neutral-400 max-w-sm text-center px-6 leading-relaxed">
+                  로컬에서 테스트 중인 경우, 다른 터미널에서 <code className="bg-neutral-800 px-1 py-0.5 rounded text-red-400 font-mono">npx partykit dev</code> 명령어가 정상 실행 중인지 확인하세요.
+                </p>
+              </>
+            )}
             <button onClick={cancelMatchmaking} className="mt-4 text-xs text-neutral-500 hover:text-neutral-300 border border-white/10 px-4 py-2 rounded transition">
               취소
             </button>
@@ -287,7 +330,7 @@ export default function Home() {
             <GameCanvas
               key={gameKey.current}
               equippedSkin={user?.equippedSkin || "shinai"}
-              playerName={user?.name ?? "무명 무사"}
+              playerName={user?.name ?? "무명 플레이어"}
               roomId={matchRoomId}
               yourSide={yourSide}
               opponentName={opponentName}
@@ -334,7 +377,7 @@ export default function Home() {
             <div className="flex flex-col gap-4">
               <div className="text-left">
                 <label className="text-[10px] text-neutral-400 font-bold block mb-1">닉네임</label>
-                <input type="text" placeholder="예: 무사 홍길동" id="login-name" defaultValue="무명 무사"
+                <input type="text" placeholder="예: 플레이어 홍길동" id="login-name" defaultValue="무명 플레이어"
                   className="w-full py-2.5 px-3 rounded-lg bg-black/45 border border-white/10 text-white text-sm focus:outline-none focus:border-amber-500" />
               </div>
               <div className="text-left">
@@ -344,7 +387,7 @@ export default function Home() {
               </div>
               <button
                 onClick={() => {
-                  const name = (document.getElementById("login-name") as HTMLInputElement).value || "무명 무사";
+                  const name = (document.getElementById("login-name") as HTMLInputElement).value || "무명 플레이어";
                   const email = (document.getElementById("login-email") as HTMLInputElement).value || "user@gmail.com";
                   handleGoogleLogin(email, name);
                 }}
