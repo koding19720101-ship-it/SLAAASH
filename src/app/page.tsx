@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import PartySocket from "partysocket";
 import GameCanvas, { SKINS_DATA } from "../components/GameCanvas";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -46,7 +45,8 @@ export default function Home() {
   const [queueCount, setQueueCount] = useState(0);
   const [roundResult, setRoundResult] = useState<{ winner: "p1" | "p2"; time: number } | null>(null);
 
-  const lobbySocketRef = useRef<PartySocket | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lobbySocketRef = useRef<any>(null);
   const gameKey = useRef(0);
 
   // ─── Load saved data ────────────────────────────────────────────────────────
@@ -92,10 +92,13 @@ export default function Home() {
   };
 
   // ─── Matchmaking via Partykit ───────────────────────────────────────────────
-  const startMatchmaking = () => {
+  const startMatchmaking = async () => {
     setPhase("matching");
     setQueueCount(1);
     setRoundResult(null);
+
+    // Dynamic import to avoid SSR/Node.js trying to access WebSocket
+    const { default: PartySocket } = await import("partysocket");
 
     const socket = new PartySocket({ host: PARTYKIT_HOST, room: MATCHMAKING_ROOM });
     lobbySocketRef.current = socket;

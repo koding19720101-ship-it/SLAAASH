@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import PartySocket from "partysocket";
 import { sfx } from "../utils/audio";
 
 interface GameCanvasProps {
@@ -40,7 +39,8 @@ export default function GameCanvas({
   onOpponentLeft,
 }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const socketRef = useRef<PartySocket | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const socketRef = useRef<any>(null);
   const [p1Instability, setP1Instability] = useState(0);
   const [p2Instability, setP2Instability] = useState(0);
 
@@ -55,6 +55,12 @@ export default function GameCanvas({
     let animationFrameId: number;
     const skinInfo = SKINS_DATA[equippedSkin] || SKINS_DATA.shinai;
     const groundY = 480;
+
+    // Async init for dynamic PartySocket import
+    let socketCleanup: (() => void) | null = null;
+
+    const initGame = async () => {
+      const { default: PartySocket } = await import("partysocket");
 
     // ─── Input ────────────────────────────────────────────────────────────────
     const keys: Record<string, boolean> = {};
@@ -279,32 +285,20 @@ export default function GameCanvas({
         me.vx = 0;
         if (keys["a"] || keys["ㅁ"]) { me.vx = -5; me.facingLeft = true; }
         if (keys["d"] || keys["ㅇ"]) { me.vx = 5; me.facingLeft = false; }
-        if ((keys["w"] || keys["ㅈ"]) && me.isGrounded) { me.vy = -12; me.isGrounded = false; }
 
         me.isBlocking = (keys["f"] || keys["ㄹ"]) && !me.isGroggy;
 
-        if (keys["shift"] && me.dashCooldown <= 0 && me.dashTimer <= 0) {
-          me.dashTimer = 8; me.dashCooldown = 50;
-          me.vx = me.facingLeft ? -16 : 16;
-        }
         if (keys["click"] && me.attackCooldown <= 0 && !me.isBlocking && !me.isGroggy) {
           me.isAttacking = true; me.attackProgress = 0; me.attackCooldown = 35;
           sfx.playSlash();
         }
       }
 
-      // Physics
-      me.vy += 0.6;
-      me.x += me.vx; me.y += me.vy;
-      if (me.y >= groundY - me.height) { me.y = groundY - me.height; me.vy = 0; me.isGrounded = true; }
+      // Physics (No vertical movement or dash)
+      me.x += me.vx;
       me.x = Math.max(0, Math.min(canvas.width - me.width, me.x));
       if (me.attackCooldown > 0) me.attackCooldown--;
-      if (me.dashCooldown > 0) me.dashCooldown--;
-      if (me.dashTimer > 0) {
-        me.dashTimer--;
-        ctx.fillStyle = me.color.replace(")", ", 0.25)").replace("rgb", "rgba");
-        ctx.fillRect(me.x, me.y, me.width, me.height);
-      }
+
       if (me.isAttacking) {
         me.attackProgress += 1 / me.attackDuration;
         if (me.attackProgress >= 1) { me.isAttacking = false; me.attackProgress = 0; }
@@ -331,44 +325,104 @@ export default function GameCanvas({
       // Hit detection (I check if MY sword hits opponent)
       detectHit();
 
+      // ── Sword Rendering Helper ──
+      const drawSword = (
+        char: {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          facingLeft: boolean;
+          isAttacking: boolean;
+          attackProgress: number;
+          isBlocking: boolean;
+          isGroggy: boolean;
+        },
+        sColor: string,
+        sWidth: number,
+        sLengthBonus: number,
+        tColor: string
+      ) => {
+        const handX = char.facingLeft ? char.x + 8 : char.x + char.width - 8;
+        const handY = char.y + char.height / 2 + 5;
+        const sLen = 60 + sLengthBonus;
+        let ang = 0;
+
+        if (char.isGroggy) {
+          ang = Math.PI / 2; // Pointing down
+        } else if (char.isAttacking) {
+          // Horizontal Slash (가로 베기)
+          const startAng = char.facingLeft ? Math.PI - 1.2 : -1.2;
+          const endAng = char.facingLeft ? Math.PI + 1.2 : 1.2;
+          ang = startAng + char.attackProgress * (endAng - startAng);
+        } else if (char.isBlocking) {
+          // Blocking: sword held vertically in front
+          ang = char.facingLeft ? -Math.PI / 2 - 0.2 : -Math.PI / 2 + 0.2;
+        } else {
+          // Idle ready stance (breathing bob)
+          const bob = Math.sin(Date.now() / 200) * 0.05;
+          ang = char.facingLeft ? -Math.PI * 0.75 + bob : -Math.PI * 0.25 + bob;
+        }
+
+        const endX = handX + Math.cos(ang) * sLen;
+        const endY = handY + Math.sin(ang) * sLen;
+
+        // Draw attack trail
+        if (char.isAttacking && char.attackProgress > 0.05) {
+          ctx.strokeStyle = tColor;
+          ctx.lineWidth = sWidth * 2.0;
+          ctx.beginPath();
+          const startAng = char.facingLeft ? Math.PI - 1.2 : -1.2;
+          ctx.arc(handX, handY, sLen, startAng, ang, char.facingLeft);
+          ctx.stroke();
+        }
+
+        // Draw guard
+        ctx.strokeStyle = "#2a2a2a";
+        ctx.lineWidth = sWidth + 2;
+        ctx.beginPath();
+        const guardAng = ang + Math.PI / 2;
+        const guardLen = 8;
+        ctx.moveTo(handX + Math.cos(guardAng) * guardLen, handY + Math.sin(guardAng) * guardLen);
+        ctx.lineTo(handX - Math.cos(guardAng) * guardLen, handY - Math.sin(guardAng) * guardLen);
+        ctx.stroke();
+
+        // Draw blade
+        ctx.strokeStyle = sColor;
+        ctx.lineWidth = sWidth;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(handX, handY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        // Extra glow when blocking
+        if (char.isBlocking) {
+          ctx.strokeStyle = char.facingLeft ? "rgba(255, 59, 63, 0.45)" : "rgba(0, 229, 255, 0.45)";
+          ctx.lineWidth = sWidth + 6;
+          ctx.beginPath();
+          ctx.moveTo(handX, handY);
+          ctx.lineTo(endX, endY);
+          ctx.stroke();
+
+          // Subtle shield crescent near the sword
+          ctx.strokeStyle = char.facingLeft ? "rgba(255, 59, 63, 0.2)" : "rgba(0, 229, 255, 0.2)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(handX, handY, sLen + 10, -Math.PI / 2 - 0.4, -Math.PI / 2 + 0.4);
+          ctx.stroke();
+        }
+      };
+
       // ── Render Me ──
       ctx.fillStyle = me.isGroggy ? (isP1 ? "#553333" : "#333355") : me.color;
       ctx.fillRect(me.x, me.y, me.width, me.height);
-      if (me.isAttacking) {
-        ctx.strokeStyle = skinInfo.color;
-        ctx.lineWidth = skinInfo.width;
-        ctx.beginPath();
-        const ang = me.facingLeft ? Math.PI - me.attackProgress * Math.PI : me.attackProgress * Math.PI;
-        const sLen = 50 + skinInfo.lengthBonus;
-        ctx.moveTo(me.x + me.width / 2, me.y + me.height / 2);
-        ctx.lineTo(me.x + me.width / 2 + Math.cos(ang) * sLen, me.y + me.height / 2 + Math.sin(ang) * sLen);
-        ctx.stroke();
-      } else if (me.isBlocking) {
-        ctx.strokeStyle = isP1 ? "rgba(255, 59, 63, 0.4)" : "rgba(0, 229, 255, 0.4)";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(me.x + (me.facingLeft ? 0 : me.width), me.y + me.height / 2, 45, -Math.PI / 2, Math.PI / 2, me.facingLeft);
-        ctx.stroke();
-      }
+      drawSword(me, skinInfo.color, skinInfo.width, skinInfo.lengthBonus, skinInfo.trailColor);
 
       // ── Render Opponent ──
       ctx.fillStyle = opp.isGroggy ? (isP1 ? "#333355" : "#553333") : opp.color;
       ctx.fillRect(opp.x, opp.y, opp.width, opp.height);
-      if (opp.isAttacking) {
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        const ang2 = opp.facingLeft ? Math.PI - opp.attackProgress * Math.PI : opp.attackProgress * Math.PI;
-        ctx.moveTo(opp.x + opp.width / 2, opp.y + opp.height / 2);
-        ctx.lineTo(opp.x + opp.width / 2 + Math.cos(ang2) * 50, opp.y + opp.height / 2 + Math.sin(ang2) * 50);
-        ctx.stroke();
-      } else if (opp.isBlocking) {
-        ctx.strokeStyle = isP1 ? "rgba(0, 229, 255, 0.4)" : "rgba(255, 59, 63, 0.4)";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(opp.x + (opp.facingLeft ? 0 : opp.width), opp.y + opp.height / 2, 45, -Math.PI / 2, Math.PI / 2, opp.facingLeft);
-        ctx.stroke();
-      }
+      drawSword(opp, opp.color, 3, 0, opp.color + "66");
 
       // Name tags
       ctx.font = "bold 13px Outfit, sans-serif";
@@ -395,15 +449,23 @@ export default function GameCanvas({
       animationFrameId = requestAnimationFrame(tick);
     };
 
-    tick();
+      tick();
+
+      // Store cleanup
+      socketCleanup = () => {
+        cancelAnimationFrame(animationFrameId);
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("keyup", onKeyUp);
+        window.removeEventListener("mousedown", onMouseDown);
+        window.removeEventListener("mouseup", onMouseUp);
+        socket.close();
+      };
+    }; // end initGame
+
+    initGame();
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("mouseup", onMouseUp);
-      socket.close();
+      if (socketCleanup) socketCleanup();
     };
   }, [equippedSkin, roomId, yourSide]);
 
